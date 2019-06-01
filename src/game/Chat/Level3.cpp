@@ -1221,7 +1221,7 @@ bool ChatHandler::HandleMaxSkillCommand(char* /*args*/)
     }
 
     // each skills that have max skill value dependent from level seted to current level max skill value
-    SelectedPlayer->UpdateSkillsToMaxSkillsForLevel();
+    SelectedPlayer->UpdateSkillsForLevel(true);
     return true;
 }
 
@@ -1249,7 +1249,7 @@ bool ChatHandler::HandleSetSkillCommand(char* args)
         return false;
 
     int32 maxskill;
-    if (!ExtractOptInt32(&args, maxskill, target->GetPureMaxSkillValue(skill)))
+    if (!ExtractOptInt32(&args, maxskill, target->GetSkillMaxPure(skill)))
         return false;
 
     if (skill <= 0)
@@ -2169,6 +2169,7 @@ bool ChatHandler::HandleLearnAllDefaultCommand(char* args)
     if (!ExtractPlayerTarget(&args, &target))
         return false;
 
+    target->LearnDefaultSkills();
     target->learnDefaultSpells();
     target->learnQuestRewardedSpells();
 
@@ -2871,10 +2872,10 @@ bool ChatHandler::HandleLookupSkillCommand(char* args)
                 if (target && target->HasSkill(id))
                 {
                     knownStr = GetMangosString(LANG_KNOWN);
-                    uint32 curValue = target->GetPureSkillValue(id);
-                    uint32 maxValue  = target->GetPureMaxSkillValue(id);
-                    uint32 permValue = target->GetSkillPermBonusValue(id);
-                    uint32 tempValue = target->GetSkillTempBonusValue(id);
+                    uint32 curValue = target->GetSkillValuePure(id);
+                    uint32 maxValue  = target->GetSkillMaxPure(id);
+                    uint32 permValue = target->GetSkillBonusPermanent(id);
+                    uint32 tempValue = target->GetSkillBonusTemporary(id);
 
                     char const* valFormat = GetMangosString(LANG_SKILL_VALUES);
                     snprintf(valStr, 50, valFormat, curValue, maxValue, permValue, tempValue);
@@ -3526,7 +3527,7 @@ bool ChatHandler::HandleDamageCommand(char* args)
     if (damage_int <= 0)
         return true;
 
-    uint32 damage = damage_int;
+    uint32 damage = uint32(damage_int);
 
     // flat melee damage without resistance/etc reduction
     if (!*args)
@@ -3553,14 +3554,18 @@ bool ChatHandler::HandleDamageCommand(char* args)
     if (!*args)
     {
         uint32 absorb = 0;
-        uint32 resist = 0;
+        int32 resist = 0;
 
         target->CalculateDamageAbsorbAndResist(player, schoolmask, SPELL_DIRECT_DAMAGE, damage, &absorb, &resist);
 
-        if (damage <= absorb + resist)
+        const uint32 bonus = (resist < 0 ? uint32(std::abs(resist)) : 0);
+        damage += bonus;
+        const uint32 malus = (resist > 0 ? (absorb + uint32(resist)) : absorb);
+
+        if (damage <= malus)
             return true;
 
-        damage -= absorb + resist;
+        damage -= malus;
 
         player->DealDamageMods(target, damage, &absorb, DIRECT_DAMAGE);
         player->DealDamage(target, damage, nullptr, DIRECT_DAMAGE, schoolmask, nullptr, false);
@@ -5158,9 +5163,6 @@ bool ChatHandler::HandleBanHelper(BanMode mode, char* args)
                     break;
                 case BAN_CHARACTER:
                     PSendSysMessage(LANG_BAN_NOTFOUND, "character", nameOrIP.c_str());
-                    break;
-                case BAN_IP:
-                    PSendSysMessage(LANG_BAN_NOTFOUND, "ip", nameOrIP.c_str());
                     break;
             }
             SetSentErrorMessage(true);

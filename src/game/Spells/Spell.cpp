@@ -644,26 +644,9 @@ void Spell::FillTargetMap()
                         case TARGET_LOCATION_CASTER_DEST:
                             SetTargetMap(SpellEffectIndex(i), m_spellInfo->EffectImplicitTargetA[i], tmpUnitLists[i /*==effToIndex[i]*/], effException[i]);
                             break;
-                        // dest point setup required
-                        case TARGET_ENUM_UNITS_SCRIPT_AOE_AT_SRC_LOC:
-                        case TARGET_ENUM_UNITS_SCRIPT_AOE_AT_DEST_LOC:
-                        case TARGET_ENUM_UNITS_ENEMY_AOE_AT_SRC_LOC:
-                        case TARGET_ENUM_UNITS_ENEMY_AOE_AT_DEST_LOC:
-                        case TARGET_ENUM_UNITS_ENEMY_AOE_AT_DYNOBJ_LOC:
-                        case TARGET_ENUM_UNITS_FRIEND_AOE_AT_SRC_LOC:
-                        case TARGET_ENUM_GAMEOBJECTS_SCRIPT_AOE_AT_DEST_LOC:
-                        // target pre-selection required
-                        case TARGET_LOCATION_CASTER_HOME_BIND:
-                        case TARGET_LOCATION_DATABASE:
-                        case TARGET_LOCATION_CASTER_SRC:
-                        case TARGET_LOCATION_SCRIPT_NEAR_CASTER:
-                        case TARGET_LOCATION_CASTER_TARGET_POSITION:
-                        case TARGET_LOCATION_UNIT_POSITION:
+                        default:
                             // need some target for processing
                             SetTargetMap(SpellEffectIndex(i), m_spellInfo->EffectImplicitTargetA[i], tmpUnitLists[i /*==effToIndex[i]*/], effException[i]);
-                            SetTargetMap(SpellEffectIndex(i), m_spellInfo->EffectImplicitTargetB[i], tmpUnitLists[i /*==effToIndex[i]*/], effException[i]);
-                            break;
-                        default:
                             SetTargetMap(SpellEffectIndex(i), m_spellInfo->EffectImplicitTargetB[i], tmpUnitLists[i /*==effToIndex[i]*/], effException[i]);
                             break;
                     }
@@ -2197,7 +2180,7 @@ void Spell::SetTargetMap(SpellEffectIndex effIndex, uint32 targetMode, UnitList&
         case TARGET_ENUM_UNITS_FRIEND_IN_CONE:
         case TARGET_ENUM_UNITS_SCRIPT_IN_CONE_60:
         {
-            SpellTargets targetType;
+            SpellTargets targetType = SPELL_TARGETS_ALL;
             switch (targetMode)
             {
                 case TARGET_ENUM_UNITS_ENEMY_IN_CONE_24:
@@ -2209,17 +2192,12 @@ void Spell::SetTargetMap(SpellEffectIndex effIndex, uint32 targetMode, UnitList&
             {
                 case TARGET_ENUM_UNITS_SCRIPT_IN_CONE_60:
                 {
-                    if (m_spellInfo->Effect[effIndex] == SPELL_EFFECT_SCRIPT_EFFECT) // workaround for neutral target type
-                        targetType = SPELL_TARGETS_ALL;
                     UnitList tempTargetUnitMap;
                     SQLMultiStorage::SQLMSIteratorBounds<SpellTargetEntry> bounds = sSpellScriptTargetStorage.getBounds<SpellTargetEntry>(m_spellInfo->Id);
                     // fill real target list if no spell script target defined
-                    FillAreaTargets(bounds.first != bounds.second ? tempTargetUnitMap : targetUnitMap,
-                        radius, cone, PUSH_CONE, bounds.first != bounds.second ? SPELL_TARGETS_ALL : targetType);
+                    FillAreaTargets(bounds.first != bounds.second ? tempTargetUnitMap : targetUnitMap, radius, cone, PUSH_CONE, targetType);
                     if (!tempTargetUnitMap.empty())
-                    {
                         CheckSpellScriptTargets(bounds, tempTargetUnitMap, targetUnitMap, effIndex);
-                    }
                     break;
                 }
                 default:
@@ -3240,7 +3218,7 @@ void Spell::_handle_immediate_phase()
         if (!m_spellInfo->HasAttribute(SPELL_ATTR_EX2_NOT_RESET_AUTO_ACTIONS))
         {
             m_caster->resetAttackTimer(BASE_ATTACK);
-            if (m_caster->haveOffhandWeapon())
+            if (m_caster->hasOffhandWeaponForAttack())
                 m_caster->resetAttackTimer(OFF_ATTACK);
         }
     }
@@ -5392,11 +5370,7 @@ SpellCastResult Spell::CheckCast(bool strict)
                 else if (m_caster->GetPetGuid())
                 {
                     if (plClass == CLASS_WARLOCK)                  // let warlock do a replacement summon
-                    {
-                        if (strict)     // Summoning Disorientation, trigger pet stun (cast by pet so it doesn't attack player)
-                            if (Pet* pet = ((Player*)m_caster)->GetPet())
-                                pet->CastSpell(pet, 32752, TRIGGERED_OLD_TRIGGERED, nullptr, nullptr, pet->GetObjectGuid());
-                    }
+                        static_cast<Player*>(m_caster)->UnsummonPetIfAny();
                     else
                         return SPELL_FAILED_ALREADY_HAVE_SUMMON;
                 }
@@ -5562,7 +5536,7 @@ SpellCastResult Spell::CheckCast(bool strict)
             }
             case SPELL_AURA_MOUNTED:
             {
-                if (m_caster->IsInWater())
+                if (m_caster->IsInWater() && (m_caster->GetTypeId() != TYPEID_PLAYER || static_cast<Player*>(m_caster)->IsInHighLiquid()))
                     return SPELL_FAILED_ONLY_ABOVEWATER;
 
                 if (m_caster->GetTypeId() == TYPEID_PLAYER && ((Player*)m_caster)->GetTransport())
@@ -5647,6 +5621,17 @@ SpellCastResult Spell::CheckCast(bool strict)
                     if (player->IsInDisallowedMountForm() || player->IsMounted())
                         return SPELL_FAILED_BAD_TARGETS;
                 }
+            }
+            case SPELL_AURA_MOD_DISARM:
+            {
+                if (!expectedTarget)
+                    return SPELL_FAILED_BAD_TARGETS;
+
+                // Target must be a weapon wielder
+                if (!expectedTarget->hasMainhandWeapon())
+                    return SPELL_FAILED_BAD_TARGETS;
+
+                break;
             }
             default:
                 break;
@@ -6900,7 +6885,7 @@ bool SpellEvent::Execute(uint64 e_time, uint32 p_time)
 
     // spell processing not complete, plan event on the next update interval
     m_Spell->GetCaster()->m_events.AddEvent(this, e_time + 1, false);
-    return false;                                           // event not complete
+    return false; // event not complete
 }
 
 void SpellEvent::Abort(uint64 /*e_time*/)

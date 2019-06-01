@@ -1,6 +1,6 @@
 #ifndef __REVISION_SQL_H__
 #define __REVISION_SQL_H__
  #define REVISION_DB_REALMD "required_z2716_01_realmd_totp"
- #define REVISION_DB_CHARACTERS "required_z2724_01_characters_taxi_system_format_update"
- #define REVISION_DB_MANGOS "required_z2729_01_mangos_creature_template_faction_removal"
+ #define REVISION_DB_CHARACTERS "required_z2737_00_characters_cooldown"
+ #define REVISION_DB_MANGOS "required_z2738_01_mangos_quest_template"
 #endif // __REVISION_SQL_H__

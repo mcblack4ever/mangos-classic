@@ -52,6 +52,12 @@ void instance_dire_maul::OnPlayerEnter(Player* pPlayer)
     DoToggleGameObjectFlags(GO_WEST_LIBRARY_DOOR, GO_FLAG_LOCKED, !m_bDoNorthBeforeWest);
 }
 
+void instance_dire_maul::OnPlayerLeave(Player* pPlayer) {
+    // Remove King of the Gordok aura
+    if (pPlayer->HasAura(SPELL_KING_OF_GORDOK))
+        pPlayer->RemoveAurasDueToSpell(SPELL_KING_OF_GORDOK);
+}
+
 void instance_dire_maul::OnCreatureCreate(Creature* pCreature)
 {
     switch (pCreature->GetEntry())
@@ -307,6 +313,7 @@ void instance_dire_maul::SetData(uint32 uiType, uint32 uiData)
                     // start WP movement for Mizzle; event handled by movement and gossip dbscripts
                     if (Creature* pMizzle = pOgre->SummonCreature(NPC_MIZZLE_THE_CRAFTY, afMizzleSpawnLoc[0], afMizzleSpawnLoc[1], afMizzleSpawnLoc[2], afMizzleSpawnLoc[3], TEMPSPAWN_DEAD_DESPAWN, 0, true))
                     {
+                        pMizzle->RemoveFlag(UNIT_NPC_FLAGS, UNIT_NPC_FLAG_GOSSIP);
                         pMizzle->SetWalk(false);
                         pMizzle->GetMotionMaster()->MoveWaypoint();
                     }

@@ -273,23 +273,16 @@ typedef std::list<SpellImmune> SpellImmuneList;
 enum UnitModifierType
 {
     BASE_VALUE = 0,
-    BASE_EXCLUSIVE = 1,
-    BASE_PCT = 2,
-    TOTAL_VALUE = 3,
-    TOTAL_PCT = 4,
-    MODIFIER_TYPE_END = 5
+    BASE_PCT = 1,
+    TOTAL_VALUE = 2,
+    TOTAL_PCT = 3,
+    MODIFIER_TYPE_END = 4
 };
 
 enum WeaponDamageRange
 {
     MINDAMAGE,
     MAXDAMAGE
-};
-
-struct WeaponDamageInfo
-{
-    float damage[2];
-    SpellSchools school;
 };
 
 enum DamageTypeToSchool
@@ -500,7 +493,7 @@ enum UnitVisibility
 enum UnitFlags
 {
     UNIT_FLAG_NONE                  = 0x00000000,
-    UNIT_FLAG_UNK_0                 = 0x00000001,           // Movement checks disabled, likely paired with loss of client control packet.
+    UNIT_FLAG_UNK_0                 = 0x00000001,           // Movement checks disabled, likely paired with loss of client control packet. We use it to add custom cliffwalking to GM mode until actual usecases will be known.
     UNIT_FLAG_NON_ATTACKABLE        = 0x00000002,           // not attackable
     UNIT_FLAG_CLIENT_CONTROL_LOST   = 0x00000004,           // Generic unspecified loss of control initiated by server script, movement checks disabled, paired with loss of client control packet.
     UNIT_FLAG_PLAYER_CONTROLLED     = 0x00000008,           // players, pets, totems, guardians, companions, charms, any units associated with players
@@ -805,7 +798,7 @@ struct SubDamageInfo
     SpellSchoolMask damageSchoolMask = SPELL_SCHOOL_MASK_NORMAL;
     uint32 damage = 0;
     uint32 absorb = 0;
-    uint32 resist = 0;
+    int32 resist = 0;
 };
 
 // Struct for use in Unit::CalculateMeleeDamage
@@ -842,7 +835,7 @@ struct SpellNonMeleeDamage
     uint32 damage;
     SpellSchools school;
     uint32 absorb;
-    uint32 resist;
+    int32  resist;
     bool   periodicLog;
     bool   unused;
     uint32 blocked;
@@ -851,13 +844,13 @@ struct SpellNonMeleeDamage
 
 struct SpellPeriodicAuraLogInfo
 {
-    SpellPeriodicAuraLogInfo(Aura* _aura, uint32 _damage, uint32 _absorb, uint32 _resist, float _multiplier)
+    SpellPeriodicAuraLogInfo(Aura* _aura, uint32 _damage, uint32 _absorb, int32 _resist, float _multiplier)
         : aura(_aura), damage(_damage), absorb(_absorb), resist(_resist), multiplier(_multiplier) {}
 
     Aura*   aura;
     uint32 damage;
     uint32 absorb;
-    uint32 resist;
+    int32 resist;
     float  multiplier;
 };
 
@@ -1235,11 +1228,22 @@ class Unit : public WorldObject
          */
         bool isAttackReady(WeaponAttackType type = BASE_ATTACK) const { return m_attackTimer[type] == 0; }
         /**
-         * Checks if the current Unit has an offhand weapon
-         * @return True if there is a offhand weapon.
+         * Checks if the current Unit has a weapon equipped at the moment
+         * @return True if there is a weapon.
          */
-        bool haveOffhandWeapon() const;
+        virtual bool hasWeapon(WeaponAttackType type) const = 0;
+        inline bool hasMainhandWeapon() const { return hasWeapon(BASE_ATTACK); }
+        inline bool hasOffhandWeapon() const { return hasWeapon(OFF_ATTACK); }
+        inline bool hasRangedWeapon() const { return hasWeapon(RANGED_ATTACK); }
         /**
+         * Checks if the current Unit has a usable weapon at the moment
+         * @return True if there is a weapon.
+         */
+        virtual bool hasWeaponForAttack(WeaponAttackType type) const { return CanUseEquippedWeapon(type); }
+        inline bool hasMainhandWeaponForAttack() const { return hasWeaponForAttack(BASE_ATTACK); }
+        inline bool hasOffhandWeaponForAttack() const { return hasWeaponForAttack(OFF_ATTACK); }
+        inline bool hasRangedWeaponForAttack() const { return hasWeaponForAttack(RANGED_ATTACK); }
+         /**
          * Does an attack if any of the timers allow it and resets them, if the user
          * isn't in range or behind the target an error is sent to the client.
          * Also makes sure to not make and offhand and mainhand attack at the same
@@ -1380,11 +1384,12 @@ class Unit : public WorldObject
 
         float GetStat(Stats stat) const { return float(GetUInt32Value(UNIT_FIELD_STAT0 + stat)); }
         void SetStat(Stats stat, int32 val) { SetStatInt32Value(UNIT_FIELD_STAT0 + stat, val); }
-        uint32 GetArmor() const { return GetResistance(SPELL_SCHOOL_NORMAL) ; }
-        void SetArmor(int32 val) { SetResistance(SPELL_SCHOOL_NORMAL, val); }
 
-        uint32 GetResistance(SpellSchools school) const { return GetUInt32Value(UNIT_FIELD_RESISTANCES + school); }
-        void SetResistance(SpellSchools school, int32 val) { SetStatInt32Value(UNIT_FIELD_RESISTANCES + school, val); }
+        inline int32 GetArmor() const { return GetResistance(SPELL_SCHOOL_NORMAL) ; }
+        inline void SetArmor(int32 val) { SetStatInt32Value(UNIT_FIELD_RESISTANCES, val); }
+
+        inline int32 GetResistance(SpellSchools school) const { return GetInt32Value(UNIT_FIELD_RESISTANCES + school); }
+        inline void SetResistance(SpellSchools school, int32 val) { SetInt32Value(UNIT_FIELD_RESISTANCES + school, val); }
 
         uint32 GetHealth()    const { return GetUInt32Value(UNIT_FIELD_HEALTH); }
         uint32 GetMaxHealth() const { return GetUInt32Value(UNIT_FIELD_MAXHEALTH); }
@@ -1428,6 +1433,8 @@ class Unit : public WorldObject
             return false;
         }
 
+        Player const* GetControllingPlayer(bool ignoreCharms = false) const;
+
         ReputationRank GetReactionTo(Unit const* unit) const override;
         ReputationRank GetReactionTo(Corpse const* corpse) const override;
 
@@ -1448,8 +1455,15 @@ class Unit : public WorldObject
 
         bool IsCivilianForTarget(Unit const* pov) const;
 
-        bool IsInGroup(Unit const* other, bool party = false, bool UI = false) const;
-        bool IsInParty(Unit const* other, bool UI = false) const { return IsInGroup(other, true, UI); }
+        // Serverside fog of war settings
+        bool IsFogOfWarVisibleStealth(Unit const* other) const;
+        bool IsFogOfWarVisibleHealth(Unit const* other) const;
+        bool IsFogOfWarVisibleStats(Unit const* other) const;
+
+        bool IsInGroup(Unit const* other, bool party = false, bool ignoreCharms = false) const;
+        inline bool IsInParty(Unit const* other, bool ignoreCharms = false) const { return IsInGroup(other, true, ignoreCharms); }
+        bool IsInGuild(Unit const* other, bool ignoreCharms = false) const;
+        bool IsInTeam(Unit const* other, bool ignoreCharms = true) const;
 
         // extensions of CanAttack and CanAssist API needed serverside
         virtual bool CanAttackSpell(Unit const* target, SpellEntry const* spellInfo = nullptr, bool isAOE = false) const override;
@@ -1457,11 +1471,6 @@ class Unit : public WorldObject
 
         bool CanAttackOnSight(Unit const* target) const; // Used in MoveInLineOfSight checks
         bool CanAssistInCombatAgainst(Unit const* who, Unit const* enemy) const;
-
-        // Serverside fog of war settings
-        bool IsFogOfWarVisibleStealth(Unit const* other) const;
-        bool IsFogOfWarVisibleHealth(Unit const* other) const;
-        bool IsFogOfWarVisibleStats(Unit const* other) const;
 
         bool IsImmuneToNPC() const { return HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_IMMUNE_TO_NPC); }
         void SetImmuneToNPC(bool state);
@@ -1485,14 +1494,14 @@ class Unit : public WorldObject
         bool IsSitState() const;
         bool IsStandState() const;
         bool IsSeatedState() const;
-        void SetStandState(uint8 state);
+        void SetStandState(uint8 state, bool acknowledge = false);
 
         bool IsMounted() const { return !!GetMountID(); }
         uint32 GetMountID() const { return GetUInt32Value(UNIT_FIELD_MOUNTDISPLAYID); }
         void Mount(uint32 mount, uint32 spellId = 0);
         void Unmount(bool from_aura = false);
 
-        uint16 GetMaxSkillValueForLevel(Unit const* target = nullptr) const { return (target ? GetLevelForTarget(target) : getLevel()) * 5; }
+        uint16 GetSkillMaxForLevel(Unit const* target = nullptr) const { return (target ? GetLevelForTarget(target) : getLevel()) * 5; }
 
         void Suicide();
         void DealDamageMods(Unit* pVictim, uint32& damage, uint32* absorb, DamageEffectType damagetype, SpellEntry const* spellProto = nullptr);
@@ -1522,6 +1531,9 @@ class Unit : public WorldObject
         SpellMissInfo MeleeSpellHitResult(Unit* pVictim, SpellEntry const* spell);
         SpellMissInfo MagicSpellHitResult(Unit* pVictim, SpellEntry const* spell, SpellSchoolMask schoolMask);
         SpellMissInfo SpellHitResult(Unit* pVictim, SpellEntry const* spell, uint8 effectMask, bool reflectable = false);
+
+        bool CanDualWield() const { return m_canDualWield; }
+        void SetCanDualWield(bool value) { m_canDualWield = value; }
 
         // Unit Combat reactions API: Dodge/Parry/Block
         bool CanDodge() const { return m_canDodge; }
@@ -1609,7 +1621,7 @@ class Unit : public WorldObject
         virtual int32 GetResistancePenetration(SpellSchools school) const;
 
         float CalculateEffectiveMagicResistancePercent(const Unit* attacker, SpellSchoolMask schoolMask, bool binary = false) const;
-        float RollMagicPartialResistRatioAgainst(const Unit* victim, SpellSchoolMask schoolMask, DamageEffectType dmgType, bool binary = false) const;
+        float RollMagicResistanceMultiplierOutcomeAgainst(const Unit* victim, SpellSchoolMask schoolMask, DamageEffectType dmgType, bool binary = false) const;
 
         float CalculateSpellResistChance(const Unit* victim, SpellSchoolMask schoolMask, const SpellEntry* spell) const;
 
@@ -1692,7 +1704,7 @@ class Unit : public WorldObject
         bool isFrozen() const;
 
         virtual bool IsInWater() const;
-        virtual bool IsUnderWater() const;
+        virtual bool IsUnderwater() const;
         bool isInAccessablePlaceFor(Unit const* unit) const;
 
         void EnergizeBySpell(Unit* pVictim, uint32 SpellID, uint32 Damage, Powers powertype);
@@ -1739,12 +1751,12 @@ class Unit : public WorldObject
         void SendAIReaction(AiReaction reactionType);
 
         void SendAttackStateUpdate(CalcDamageInfo* calcDamageInfo) const;
-        void SendAttackStateUpdate(uint32 HitInfo, Unit* target, SpellSchoolMask damageSchoolMask, uint32 Damage, uint32 AbsorbDamage, uint32 Resist, VictimState TargetState, uint32 BlockedAmount);
+        void SendAttackStateUpdate(uint32 HitInfo, Unit* target, SpellSchoolMask damageSchoolMask, uint32 Damage, uint32 AbsorbDamage, int32 Resist, VictimState TargetState, uint32 BlockedAmount);
         void SendEnergizeSpellLog(Unit* pVictim, uint32 SpellID, uint32 Damage, Powers powertype) const;
         void SendEnvironmentalDamageLog(uint8 type, uint32 damage, uint32 absorb, int32 resist) const;
         void SendHealSpellLog(Unit* pVictim, uint32 SpellID, uint32 Damage, bool critical = false);
         void SendSpellNonMeleeDamageLog(SpellNonMeleeDamage* log) const;
-        void SendSpellNonMeleeDamageLog(Unit* target, uint32 spellID, uint32 damage, SpellSchoolMask damageSchoolMask, uint32 absorbedDamage, uint32 resist, bool isPeriodic, uint32 blocked, bool criticalHit = false, bool split = false);
+        void SendSpellNonMeleeDamageLog(Unit* target, uint32 spellID, uint32 damage, SpellSchoolMask damageSchoolMask, uint32 absorbedDamage, int32 resist, bool isPeriodic, uint32 blocked, bool criticalHit = false, bool split = false);
         void SendPeriodicAuraLog(SpellPeriodicAuraLogInfo* pInfo) const;
         void SendSpellMiss(Unit* target, uint32 spellID, SpellMissInfo missInfo) const;
         void SendSpellOrDamageImmune(Unit* target, uint32 spellID) const;
@@ -1826,8 +1838,6 @@ class Unit : public WorldObject
         // Beneficiary: owner of the xp/loot/etc credit, master or self (server-side)
         Unit* GetBeneficiary() const;
         Player* GetBeneficiaryPlayer() const;
-        // Controlling player: official client PoV and term on which player is the "master" of the unit at the moment, limited recursive master/beneficiary logic (client-side)
-        Player const* GetControllingPlayer() const;
 
         // Client controlled: check if unit currently is under client control (has active "mover"), optionally check for specific client (server-side)
         bool IsClientControlled(Player const* exactClient = nullptr) const;
@@ -1914,6 +1924,8 @@ class Unit : public WorldObject
         uint32 GetCreateMana() const { return GetUInt32Value(UNIT_FIELD_BASE_MANA); }
         uint32 GetCreatePowers(Powers power) const;
         float GetCreateStat(Stats stat) const { return m_createStats[stat]; }
+        void SetCreateResistance(SpellSchools school, int32 val) { m_createResistances[school] = val; }
+        int32 GetCreateResistance(SpellSchools school) const { return m_createResistances[school]; }
 
         void SetCurrentCastedSpell(Spell* pSpell);
         void InterruptSpell(CurrentSpellTypes spellType, bool withDelayed = true);
@@ -1965,6 +1977,7 @@ class Unit : public WorldObject
 
         float m_threatModifier[MAX_SPELL_SCHOOL];
         float m_modAttackSpeedPct[3];
+        float m_modAttackBaseDPSPct[MAX_ATTACK] = { 1.0f, 1.0f, 1.0f };
 
         // Event handler
         EventProcessor m_events;
@@ -1974,6 +1987,7 @@ class Unit : public WorldObject
         void SetModifierValue(UnitMods unitMod, UnitModifierType modifierType, float value) { m_auraModifiersGroup[unitMod][modifierType] = value; }
         float GetModifierValue(UnitMods unitMod, UnitModifierType modifierType) const;
         float GetTotalStatValue(Stats stat) const;
+        int32 GetTotalResistanceValue(SpellSchools school) const;
         float GetTotalAuraModValue(UnitMods unitMod) const;
         SpellSchools GetSpellSchoolByAuraGroup(UnitMods unitMod) const;
         Stats GetStatByAuraGroup(UnitMods unitMod) const;
@@ -2167,7 +2181,7 @@ class Unit : public WorldObject
         bool IsImmuneToSchool(SpellEntry const* spellInfo) const;
 
         uint32 CalcArmorReducedDamage(Unit* pVictim, const uint32 damage);
-        void CalculateDamageAbsorbAndResist(Unit* pCaster, SpellSchoolMask schoolMask, DamageEffectType damagetype, const uint32 damage, uint32* absorb, uint32* resist, bool canReflect = false, bool canResist = true, bool binary = false);
+        void CalculateDamageAbsorbAndResist(Unit* pCaster, SpellSchoolMask schoolMask, DamageEffectType damagetype, const uint32 damage, uint32* absorb, int32* resist, bool canReflect = false, bool canResist = true, bool binary = false);
         void CalculateAbsorbResistBlock(Unit* pCaster, SpellNonMeleeDamage* damageInfo, SpellEntry const* spellProto, WeaponAttackType attType = BASE_ATTACK);
 
         void  UpdateSpeed(UnitMoveType mtype, bool forced, float ratio = 1.0f);
@@ -2250,7 +2264,7 @@ class Unit : public WorldObject
         Movement::MoveSpline* movespline;
 
         void ScheduleAINotify(uint32 delay, bool forced = false);
-        bool IsAINotifyScheduled() const { return bool(m_AINotifyEvent);}
+        bool IsAINotifyScheduled() const { return m_AINotifyEvent != nullptr;}
         void FinalizeAINotifyEvent() { m_AINotifyEvent = nullptr; }
         void AbortAINotifyEvent();
         void OnRelocated();
@@ -2347,6 +2361,7 @@ class Unit : public WorldObject
         uint32 m_attackTimer[MAX_ATTACK];
 
         float m_createStats[MAX_STATS];
+        int32 m_createResistances[MAX_SPELL_SCHOOL];
 
         Unit* m_attacking;
 
@@ -2389,6 +2404,8 @@ class Unit : public WorldObject
         bool m_canDodge;
         bool m_canParry;
         bool m_canBlock;
+
+        bool m_canDualWield = false;
 
         void DisableSpline();
         bool m_isCreatureLinkingTrigger;
