@@ -1225,6 +1225,28 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
             {
                 switch (GetId())
                 {
+                    case 126:                               // Eye of Kilrogg
+                    {
+                        if (target->IsPlayer())
+                        {
+                            Unit* pet = static_cast<Player*>(target)->GetCharm();
+                            if (pet && pet->GetEntry() == 4277)
+                            {
+                                pet->CastSpell(pet, 2585, TRIGGERED_OLD_TRIGGERED);
+                            }
+                        }
+                        break;
+                    }
+                    case 11403:                             // Dream Vision
+                    {
+                        if (target->IsPlayer())
+                        {
+                            Unit* pet = static_cast<Player*>(target)->GetCharm();
+                            if (pet && pet->GetEntry() == 7863)
+                                pet->SetVisibility(VISIBILITY_OFF);
+                        }
+                        break;
+                    }
                     case 7057:                              // Haunting Spirits
                         // expected to tick with 30 sec period (tick part see in Aura::PeriodicTick)
                         m_isPeriodic = true;
@@ -1267,6 +1289,24 @@ void Aura::HandleAuraDummy(bool apply, bool Real)
                     {
                         if (target->HasAura(25040))
                             target->CastSpell(target, 25043, TRIGGERED_OLD_TRIGGERED, nullptr, nullptr, GetCaster()->GetObjectGuid());
+                        return;
+                    }
+                    case 26681:                             // Cologne
+                    {
+                        if (Unit* target = GetTarget())
+                        {
+                            if (target->HasAura(26682))
+                                target->RemoveAurasDueToSpell(26682);
+                        }
+                        return;
+                    }
+                    case 26682:                             // Perfume
+                    {
+                        if (Unit* target = GetTarget())
+                        {
+                            if (target->HasAura(26681))
+                                target->RemoveAurasDueToSpell(26681);
+                        }
                         return;
                     }
                     case 28832:                             // Mark of Korth'azz
@@ -4381,6 +4421,10 @@ void Aura::HandleSchoolAbsorb(bool apply, bool Real)
 void Aura::PeriodicTick()
 {
     Unit* target = GetTarget();
+    // passive periodic trigger spells should not be updated when dead, only death persistent should
+    if (!target->isAlive() && GetHolder()->IsPassive())
+        return;
+
     SpellEntry const* spellProto = GetSpellProto();
 
     switch (m_modifier.m_auraname)
@@ -4880,11 +4924,6 @@ void Aura::PeriodicTick()
         }
         case SPELL_AURA_PERIODIC_TRIGGER_SPELL:
         {
-            // Some NPCs have persistent passive auras that are not removed on death
-            // so prevent them from triggering if aura holder is dead
-            Unit* caster = GetCaster();
-            if (caster && caster->GetTypeId() == TYPEID_UNIT && !caster->isAlive())
-                break;
             TriggerSpell();
             break;
         }

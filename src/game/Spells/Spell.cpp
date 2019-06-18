@@ -2984,11 +2984,7 @@ void Spell::cast(bool skipCheck)
     SpellCastResult castResult = CheckPower();
     if (castResult != SPELL_CAST_OK)
     {
-        SendCastResult(castResult);
-        SendInterrupted(castResult);
-        finish(false);
-        m_caster->DecreaseCastCounter();
-        SetExecutedCurrently(false);
+        StopCast(castResult);
         return;
     }
 
@@ -2998,11 +2994,7 @@ void Spell::cast(bool skipCheck)
         castResult = CheckCast(false);
         if (castResult != SPELL_CAST_OK)
         {
-            SendCastResult(castResult);
-            SendInterrupted(castResult);
-            finish(false);
-            m_caster->DecreaseCastCounter();
-            SetExecutedCurrently(false);
+            StopCast(castResult);
             return;
         }
     }
@@ -3237,9 +3229,7 @@ void Spell::_handle_immediate_phase()
 
         // apply Send Event effect to ground in case empty target lists
         if (m_spellInfo->Effect[j] == SPELL_EFFECT_SEND_EVENT && !HaveTargetsForEffect(SpellEffectIndex(j)))
-        {
             HandleEffects(nullptr, nullptr, nullptr, SpellEffectIndex(j));
-        }
     }
 
     // initialize Diminishing Returns Data
@@ -4081,7 +4071,7 @@ void Spell::TakeAmmo() const
 
 void Spell::TakeReagents()
 {
-    if (m_caster->GetTypeId() != TYPEID_PLAYER)
+    if (!m_caster->IsPlayer())
         return;
 
     if (IgnoreItemRequirements())                           // reagents used in triggered spell removed by original spell or don't must be removed.
@@ -4285,17 +4275,18 @@ SpellCastResult Spell::CheckCast(bool strict)
     if (m_caster->GetTypeId() == TYPEID_PLAYER && !m_spellInfo->HasAttribute(SPELL_ATTR_PASSIVE) &&
             !m_IsTriggeredSpell && !m_caster->IsSpellReady(*m_spellInfo, m_CastItem ? m_CastItem->GetProto() : nullptr))
     {
-        if (m_triggeredByAuraSpell)
-            return SPELL_FAILED_DONT_REPORT;
-        return SPELL_FAILED_NOT_READY;
+        return m_triggeredByAuraSpell ? SPELL_FAILED_DONT_REPORT : SPELL_FAILED_NOT_READY;
     }
 
     if (!m_caster->isAlive() && m_caster->GetTypeId() == TYPEID_PLAYER && !m_spellInfo->HasAttribute(SPELL_ATTR_CASTABLE_WHILE_DEAD) && !m_spellInfo->HasAttribute(SPELL_ATTR_PASSIVE))
         return SPELL_FAILED_CASTER_DEAD;
 
+    if (!m_caster->IsStandState() && !m_spellInfo->HasAttribute(SPELL_ATTR_CASTABLE_WHILE_SITTING))
+        return SPELL_FAILED_NOT_STANDING;
+
     // check global cooldown
     if (strict && !m_IsTriggeredSpell && m_caster->HasGCD(m_spellInfo))
-        return SPELL_FAILED_NOT_READY;
+        return m_spellInfo->HasAttribute(SPELL_ATTR_DISABLED_WHILE_ACTIVE) ? SPELL_FAILED_DONT_REPORT : SPELL_FAILED_NOT_READY;
 
     // only allow triggered spells if at an ended battleground
     if (!m_IsTriggeredSpell && m_caster->GetTypeId() == TYPEID_PLAYER)
@@ -4303,8 +4294,7 @@ SpellCastResult Spell::CheckCast(bool strict)
             if (bg->GetStatus() == STATUS_WAIT_LEAVE)
                 return SPELL_FAILED_DONT_REPORT;
 
-    if (!m_IsTriggeredSpell && IsNonCombatSpell(m_spellInfo) &&
-            m_caster->isInCombat())
+    if (!m_IsTriggeredSpell && IsNonCombatSpell(m_spellInfo) && m_caster->isInCombat())
         return SPELL_FAILED_AFFECTING_COMBAT;
 
     if (m_caster->GetTypeId() == TYPEID_PLAYER && !((Player*)m_caster)->isGameMaster() &&
@@ -4366,9 +4356,7 @@ SpellCastResult Spell::CheckCast(bool strict)
                     for (Unit::AuraList::const_iterator itr = auraClassScripts.begin(); itr != auraClassScripts.end();)
                     {
                         if ((*itr)->GetModifier()->m_miscvalue == 3655)
-                        {
                             return SPELL_FAILED_TARGET_AURASTATE;
-                        }
                         else
                             ++itr;
                     }
@@ -4386,9 +4374,7 @@ SpellCastResult Spell::CheckCast(bool strict)
                     for (Unit::AuraList::const_iterator itr = auraClassScripts.begin(); itr != auraClassScripts.end();)
                     {
                         if ((*itr)->GetModifier()->m_miscvalue == 4327)
-                        {
                             return SPELL_FAILED_FIZZLE;
-                        }
                         else
                             ++itr;
                     }
@@ -4403,9 +4389,7 @@ SpellCastResult Spell::CheckCast(bool strict)
                     for (Unit::AuraList::const_iterator itr = auraClassScripts.begin(); itr != auraClassScripts.end();)
                     {
                         if ((*itr)->GetModifier()->m_miscvalue == 3654)
-                        {
                             return SPELL_FAILED_TARGET_AURASTATE;
-                        }
                         else
                             ++itr;
                     }
@@ -4640,13 +4624,19 @@ SpellCastResult Spell::CheckCast(bool strict)
                 for (Unit::SpellAuraHolderMap::const_iterator iter = spair.begin(); iter != spair.end(); ++iter)
                 {
                     const SpellAuraHolder* existing = iter->second;
+                    // We can overwrite own auras at all times
+                    if (casterGuid == existing->GetCasterGuid())
+                        continue;
                     const SpellEntry* entry = existing->GetSpellProto();
-                    const bool own = (casterGuid == existing->GetCasterGuid());
                     // Cannot overwrite someone else's auras
-                    if (!own && sSpellMgr.IsNoStackSpellDueToSpell(m_spellInfo, entry))
+                    if (!sSpellMgr.IsSpellStackableWithSpellForDifferentCasters(m_spellInfo, entry))
                     {
-                        if (IsSimilarExistingAuraStronger(m_caster, m_spellInfo->Id, existing) ||
-                            (sSpellMgr.IsSpellAnotherRankOfSpell(m_spellInfo->Id, entry->Id) && sSpellMgr.IsSpellHigherRankOfSpell(entry->Id, m_spellInfo->Id)))
+                        bool bounce = false;
+                        if (IsSimilarExistingAuraStronger(m_caster, m_spellInfo->Id, existing))
+                            bounce = true;
+                        if (!bounce && sSpellMgr.IsSpellAnotherRankOfSpell(m_spellInfo->Id, entry->Id) && sSpellMgr.IsSpellHigherRankOfSpell(entry->Id, m_spellInfo->Id))
+                            bounce = true;
+                        if (bounce)
                             return SPELL_FAILED_AURA_BOUNCED;
                     }
                 }
@@ -5661,6 +5651,23 @@ SpellCastResult Spell::CheckCast(bool strict)
             return SPELL_FAILED_NOT_TRADING;
     }
 
+    switch (m_spellInfo->Id)
+    {
+        case 27230: // Health Stone
+        case 11730:
+        case 11729:
+        case 6202:
+        case 6201:
+        case 5699:
+        {
+            // check if we already have a healthstone
+            uint32 itemType = GetUsableHealthStoneItemType(m_caster);
+            if (itemType && m_caster->IsPlayer() && ((Player*)m_caster)->GetItemCount(itemType) > 0)
+                return SPELL_FAILED_TOO_MANY_OF_ITEM;
+            break;
+        }
+    }
+
     if (m_caster->GetTypeId() == TYPEID_PLAYER && m_spellInfo->HasAttribute(SPELL_ATTR_EX2_TAME_BEAST))
     {
         Player* player = (Player*)m_caster;
@@ -6274,10 +6281,14 @@ SpellCastResult Spell::CheckItems()
         {
             case SPELL_EFFECT_CREATE_ITEM:
             {
+                // check requirement at spell end
+                if (m_spellState == SPELL_STATE_TARGETING)
+                    break;
+
                 if (!m_IsTriggeredSpell && m_spellInfo->EffectItemType[i])
                 {
                     ItemPosCountVec dest;
-                    InventoryResult msg = playerTarget->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, m_spellInfo->EffectItemType[i], 1);
+                    InventoryResult msg = playerTarget->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, m_spellInfo->EffectItemType[i], CalculateDamage(SpellEffectIndex(i), m_caster));
                     if (msg != EQUIP_ERR_OK)
                     {
                         p_caster->SendEquipError(msg, nullptr, nullptr, m_spellInfo->EffectItemType[i]);
@@ -6885,7 +6896,7 @@ bool SpellEvent::Execute(uint64 e_time, uint32 p_time)
 
     // spell processing not complete, plan event on the next update interval
     m_Spell->GetCaster()->m_events.AddEvent(this, e_time + 1, false);
-    return false; // event not complete
+    return false;                                           // event not complete
 }
 
 void SpellEvent::Abort(uint64 /*e_time*/)
@@ -7203,4 +7214,13 @@ void Spell::OnSuccessfulSpellFinish()
             break;
         }
     }
+}
+
+void Spell::StopCast(SpellCastResult castResult)
+{
+    SendCastResult(castResult);
+    SendInterrupted(castResult);
+    finish(false);
+    m_caster->DecreaseCastCounter();
+    SetExecutedCurrently(false);
 }
