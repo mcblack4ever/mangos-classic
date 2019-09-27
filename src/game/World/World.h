@@ -146,6 +146,8 @@ enum eConfigUInt32Values
     CONFIG_UINT32_CREATURE_FAMILY_ASSISTANCE_DELAY,
     CONFIG_UINT32_CREATURE_FAMILY_FLEE_DELAY,
     CONFIG_UINT32_WORLD_BOSS_LEVEL_DIFF,
+    CONFIG_UINT32_QUEST_WEEKLY_RESET_WEEK_DAY,
+    CONFIG_UINT32_QUEST_WEEKLY_RESET_HOUR,
     CONFIG_UINT32_CHAT_STRICT_LINK_CHECKING_SEVERITY,
     CONFIG_UINT32_CHAT_STRICT_LINK_CHECKING_KICK,
     CONFIG_UINT32_CORPSE_DECAY_NORMAL,
@@ -175,6 +177,7 @@ enum eConfigUInt32Values
     CONFIG_UINT32_FOGOFWAR_STEALTH,
     CONFIG_UINT32_FOGOFWAR_HEALTH,
     CONFIG_UINT32_FOGOFWAR_STATS,
+    CONFIG_UINT32_CREATURE_PICKPOCKET_RESTOCK_DELAY,
     CONFIG_UINT32_VALUE_COUNT
 };
 
@@ -530,12 +533,8 @@ class World
         static float GetMaxVisibleDistanceInInstances()     { return m_MaxVisibleDistanceInInstances;  }
         static float GetMaxVisibleDistanceInBG()            { return m_MaxVisibleDistanceInBG;         }
 
-        static float GetMaxVisibleDistanceInFlight()        { return m_MaxVisibleDistanceInFlight;    }
-        static float GetVisibleUnitGreyDistance()           { return m_VisibleUnitGreyDistance;       }
-        static float GetVisibleObjectGreyDistance()         { return m_VisibleObjectGreyDistance;     }
-
-        static float GetRelocationLowerLimitSq()            { return m_relocation_lower_limit_sq; }
-        static uint32 GetRelocationAINotifyDelay()          { return m_relocation_ai_notify_delay; }
+        static float GetRelocationLowerLimitSq() { return m_relocation_lower_limit_sq; }
+        static uint32 GetRelocationAINotifyDelay() { return m_relocation_ai_notify_delay; }
 
         void InitServerMaintenanceCheck();
         void ServerMaintenanceStart();
@@ -580,6 +579,9 @@ class World
         void _UpdateGameTime();
         // callback for UpdateRealmCharacters
         void _UpdateRealmCharCount(QueryResult* resultCharCount, uint32 accountId);
+
+        void InitWeeklyQuestResetTime();
+        void ResetWeeklyQuests();
 
     private:
         void setConfig(eConfigUInt32Values index, char const* fieldname, uint32 defvalue);
@@ -635,16 +637,15 @@ class World
         static float m_MaxVisibleDistanceInInstances;
         static float m_MaxVisibleDistanceInBG;
 
-        static float m_MaxVisibleDistanceInFlight;
-        static float m_VisibleUnitGreyDistance;
-        static float m_VisibleObjectGreyDistance;
-
         static float  m_relocation_lower_limit_sq;
         static uint32 m_relocation_ai_notify_delay;
 
         // CLI command holder to be thread safe
         std::mutex m_cliCommandQueueLock;
         std::deque<const CliCommandHolder*> m_cliCommandQueue;
+
+        // next weekly quests reset time
+        time_t m_NextWeeklyQuestReset;
 
         // Player Queue
         Queue m_QueuedSessions;

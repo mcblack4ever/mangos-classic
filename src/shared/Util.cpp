@@ -23,7 +23,6 @@
 
 #include <boost/asio.hpp>
 
-#include <random>
 #include <chrono>
 #include <cstdarg>
 
@@ -34,6 +33,11 @@ std::mt19937* initRand()
 }
 
 static MaNGOS::thread_local_ptr<std::mt19937> mtRand(&initRand);
+
+std::mt19937* GetRandomGenerator()
+{
+    return mtRand.get();
+}
 
 uint32 WorldTimer::m_iTime = 0;
 uint32 WorldTimer::m_iPrevTime = 0;
@@ -74,8 +78,8 @@ uint32 urand(uint32 min, uint32 max)
 
 float frand(float min, float max)
 {
-    std::uniform_real_distribution<double> dist(min, max);
-    return float(dist(*mtRand.get()));
+    std::uniform_real_distribution<float> dist(min, max);
+    return dist(*mtRand.get());
 }
 
 int32 irand()

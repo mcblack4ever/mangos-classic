@@ -449,7 +449,7 @@ bool QuestAccept_npc_ogron(Player* pPlayer, Creature* pCreature, const Quest* pQ
         if (npc_ogronAI* pEscortAI = dynamic_cast<npc_ogronAI*>(pCreature->AI()))
         {
             pEscortAI->Start(false, pPlayer, pQuest, true);
-            pCreature->SetFactionTemporary(FACTION_ESCORT_N_FRIEND_PASSIVE, TEMPFACTION_RESTORE_RESPAWN);
+            pCreature->SetFactionTemporary(FACTION_ESCORT_N_FRIEND_PASSIVE, TEMPFACTION_RESTORE_RESPAWN | TEMPFACTION_TOGGLE_IMMUNE_TO_NPC);
             DoScriptText(SAY_OGR_START, pCreature, pPlayer);
         }
     }
@@ -529,7 +529,7 @@ struct npc_private_hendelAI : public ScriptedAI
         AttackStart(pAttacker);
     }
 
-    void SpellHit(Unit* pCaster, const SpellEntry* pSpell) override
+    void SpellHit(Unit* /*pCaster*/, const SpellEntry* pSpell) override
     {
         // If Private Hendel is hit by spell Teleport (from DBScript)
         // this means it is time to grant quest credit to the player previously stored to this intend
@@ -540,9 +540,9 @@ struct npc_private_hendelAI : public ScriptedAI
         }
     }
 
-    void DamageTaken(Unit* pDoneBy, uint32& uiDamage, DamageEffectType /*damagetype*/) override
+    void DamageTaken(Unit* pDoneBy, uint32& damage, DamageEffectType /*damagetype*/, SpellEntry const* /*spellInfo*/) override
     {
-        if (uiDamage > m_creature->GetHealth() || m_creature->GetHealthPercent() < 20.0f)
+        if (damage > m_creature->GetHealth() || m_creature->GetHealthPercent() < 20.0f)
         {
             if (Player* pPlayer = pDoneBy->GetBeneficiaryPlayer())
             {
@@ -550,7 +550,7 @@ struct npc_private_hendelAI : public ScriptedAI
                     guidPlayer = pPlayer->GetObjectGuid();  // Store the player to give quest credit later
             }
 
-            uiDamage = 0;
+            damage = 0;
 
             DoScriptText(EMOTE_SURRENDER, m_creature);
             EnterEvadeMode();
